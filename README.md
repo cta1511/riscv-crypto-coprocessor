@@ -1,20 +1,20 @@
 # RISC-V SoC with Crypto Coprocessor
 
-Project này dựng từ đầu theo block diagram:
+This project implements a small RISC-V SoC with an AXI4-Lite crypto coprocessor, built from the block diagram in RTL.
 
-- `rtl/riscv_crypto_soc.v`: top-level SoC dùng `picorv32_axi`
-- `rtl/pynq_z2_top.v`: wrapper target riêng cho board PYNQ-Z2
-- `rtl/crypto_coprocessor_axi.v`: AXI4-Lite slave + register file + FSM điều khiển
+- `rtl/riscv_crypto_soc.v`: top-level SoC using `picorv32_axi`
+- `rtl/pynq_z2_top.v`: PYNQ-Z2 board-specific top-level wrapper
+- `rtl/crypto_coprocessor_axi.v`: AXI4-Lite slave, register file, and control FSM
 - `rtl/aes128_core.v`: AES-128 block encryption
-- `rtl/sha256_core.v`: SHA-256 cho 1 block 512-bit
-- `rtl/chacha20_core.v`: ChaCha20 block function 64-byte keystream
+- `rtl/sha256_core.v`: SHA-256 single 512-bit block compression
+- `rtl/chacha20_core.v`: ChaCha20 block function generating a 64-byte keystream
 - `rtl/axi_lite_mem.v`: ROM/RAM AXI-Lite
-- `rtl/axi_lite_crossbar.v`: interconnect 1 master / 3 slave
-- `tb/tb_crypto_axi.v`: testbench mô phỏng và kiểm tra vector chuẩn
-- `tb/tb_soc_firmware.v`: testbench end-to-end với CPU PicoRV32 chạy firmware thật
-- `sim/vivado_run.tcl`: script chạy xsim trong Vivado
-- `sim/vivado_build_pynq_z2.tcl`: script build bitstream cho PYNQ-Z2
-- `constraints/pynq_z2.xdc`: pin constraints cho clock/buttons/switches/LED/Pmod JB
+- `rtl/axi_lite_crossbar.v`: 1-master / 3-slave AXI-Lite interconnect
+- `tb/tb_crypto_axi.v`: simulation testbench with standard crypto test vectors
+- `tb/tb_soc_firmware.v`: end-to-end testbench with PicoRV32 running firmware
+- `sim/vivado_run.tcl`: Vivado xsim simulation script
+- `sim/vivado_build_pynq_z2.tcl`: Vivado bitstream build script for PYNQ-Z2
+- `constraints/pynq_z2.xdc`: pin constraints for clock, buttons, switches, LEDs, and Pmod JB
 
 ## Address map
 
@@ -49,62 +49,60 @@ Project này dựng từ đầu theo block diagram:
   - key: `BUF[8]..BUF[15]`
   - counter: `BUF[16]`
   - nonce: `BUF[17]..BUF[19]`
-  - keystream: ghi đè `BUF[0]..BUF[15]`
+  - keystream: overwrites `BUF[0]..BUF[15]`
 
-## Chạy mô phỏng trên Vivado
+## Running simulation in Vivado
 
-Từ terminal:
+From the repository root:
 
 ```bash
-cd "/Users/caothanhan/Documents/New project"
 vivado -mode batch -source sim/vivado_run.tcl
 ```
 
-## Build cho PYNQ-Z2
+## Building for PYNQ-Z2
 
 Target board:
 
 - FPGA part: `xc7z020clg400-1`
-- PL clock: `125 MHz` tại pin `H16`
+- PL clock: `125 MHz` on pin `H16`
 
 Build bitstream:
 
 ```bash
-cd "/Users/caothanhan/Documents/New project"
 vivado -mode batch -source sim/vivado_build_pynq_z2.tcl
 ```
 
-Sau khi chạy xong, bitstream và report sẽ nằm trong:
+After the build completes, the bitstream and reports are written to:
 
 - `build/pynq_z2/`
 
-### Mapping trên board
+### Board mapping
 
-- `BTN[0]`: reset SoC
-- `SW[0] = 0`: LED hiển thị `heartbeat/reset/trap/AXI activity`
-- `SW[0] = 1`: LED hiển thị `firmware passmask`
-- `JB[0..7]`: xuất tín hiệu debug để đo bằng LA/scope
+- `BTN[0]`: reset the SoC
+- `SW[0] = 0`: LEDs show `heartbeat/reset/trap/AXI activity`
+- `SW[0] = 1`: LEDs show the `firmware passmask`
+- `JB[0..7]`: debug signals for logic analyzer or oscilloscope probing
 
-Lưu ý:
+Notes:
 
-- Cổng USB-UART trên PYNQ-Z2 đi qua Zynq PS MIO, không nối trực tiếp với logic PL. Vì vậy bản target hiện tại không giả lập PL UART ra microUSB để tránh constraint sai.
-- Nếu cần UART cho logic PL, nên route ra Pmod JB/JA hoặc chuyển sang kiến trúc có Zynq PS.
+- The USB-UART port on the PYNQ-Z2 is connected through the Zynq PS MIO pins, not directly to PL logic. For that reason, this target does not expose a PL UART on the micro-USB connector.
+- If a PL-side UART is needed, route it through Pmod JB/JA or move to an architecture that uses the Zynq PS.
 
-Testbench Vivado mặc định hiện chạy end-to-end với PicoRV32 executing firmware trong ROM.
+The default Vivado testbench runs an end-to-end simulation with PicoRV32 executing firmware from ROM.
 
-Các bài kiểm tra hiện có:
+Current tests:
 
 - AES-128 known answer test
-- SHA-256 cho chuỗi `"abc"`
+- SHA-256 for the string `"abc"`
 - ChaCha20 RFC8439 block test
-- CPU PicoRV32 tự ghi MMIO, poll `DONE`, verify kết quả và ghi trạng thái `PASS/FAIL` vào RAM
+- PicoRV32 writes MMIO registers, polls `DONE`, verifies the results, and writes `PASS/FAIL` status to RAM
 
-## Ghi chú
+## Notes
 
-- `firmware/boot_rom.hex` chỉ là ROM tối thiểu để SoC top có thể elaborate; verify chính đang tập trung vào crypto coprocessor qua AXI-Lite.
-- Firmware hiện được viết ở `firmware/program.S` và build bằng `firmware/miniasm.py`, nên không phụ thuộc toolchain RISC-V ngoài.
+- `firmware/boot_rom.hex` is a minimal ROM image used so the SoC top can elaborate; the main verification flow focuses on the crypto coprocessor through AXI-Lite.
+- Firmware is written in `firmware/program.S` and built with `firmware/miniasm.py`, so no external RISC-V toolchain is required.
 - RAM debug words:
-  - `0x1000_0000`: magic `0x600d0001` khi pass, `0xdead000X` khi fail
+  - `0x1000_0000`: magic value `0x600d0001` on pass, `0xdead000X` on fail
   - `0x1000_0004`: bitmask pass (`bit0=AES`, `bit1=SHA`, `bit2=ChaCha`)
-  - `0x1000_0008`: stage hiện tại
-  - `0x1000_000C`: word mismatch cuối cùng nếu fail
+  - `0x1000_0008`: current stage
+  - `0x1000_000C`: last mismatched word on failure
